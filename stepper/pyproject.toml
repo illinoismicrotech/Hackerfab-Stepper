@@ -3,7 +3,10 @@ name = "stepper"
 version = "0.1.0"
 description = "HackerFab photolithography stepper control"
 readme = "README.md"
-requires-python = ">=3.10"
+# Pillow 11.1 (locked below) ships native wheels through Python 3.13.  Keeping
+# Python below 3.14 prevents uv from falling back to a platform-specific Pillow
+# source build on a fresh macOS or Windows installation.
+requires-python = ">=3.10,<3.14"
 dependencies = [
     "opencv-python>=4.10",
     "pillow>=10.0",

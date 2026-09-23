@@ -11,10 +11,11 @@ _SERIAL_TIMEOUT = 5.0  # seconds to wait for a GRBL response before raising
 class GrblStage(StageController):
     """Controls a GRBL-based stepper motor stage over a serial port."""
 
-    def __init__(self, controller_target, enable_homing: bool):
+    def __init__(self, controller_target, enable_homing: bool, invert_z: bool = False):
         self.controller_target = controller_target
         self.controller_target.timeout = _SERIAL_TIMEOUT
         self.enable_homing = enable_homing
+        self.z_direction = -1.0 if invert_z else 1.0
 
         # Give GRBL time to boot, then discard the startup banner
         time.sleep(2.0)
@@ -58,7 +59,9 @@ class GrblStage(StageController):
                 .decode('ascii', errors='replace')
             )
             if line.startswith('<') and line.endswith('>'):
-                return self._parse_state(line)
+                idle, position = self._parse_state(line)
+                # Keep readback in the same coordinate system as application moves.
+                return idle, (position[0], position[1], position[2] * self.z_direction)
             if not line:
                 break
             # Discard any queued 'ok' or info lines
@@ -108,7 +111,7 @@ class GrblStage(StageController):
         if 'y' in microns:
             parts.append(f'Y{microns["y"] / 1000.0:.4f}')
         if 'z' in microns:
-            parts.append(f'Z{microns["z"] / 1000.0:.4f}')
+            parts.append(f'Z{microns["z"] * self.z_direction / 1000.0:.4f}')
         self._send_msg((' '.join(parts) + '\n').encode('ascii'))
 
     def move_by(self, amounts: dict[str, float]) -> None:

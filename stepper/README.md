@@ -12,11 +12,15 @@ For more information about software setup, hardware assembly, or the Hacker Fab 
 
 ### Requirements
 
-- **Linux / macOS:** `curl` (pre-installed on most systems)
+- **Python 3.10–3.13** (Python 3.13 recommended). Install it from
+  [python.org](https://www.python.org/downloads/). Python 3.14 is not yet
+  supported because its Pillow wheel is unavailable.
+- **Linux / macOS:** Bash (pre-installed on most systems)
 - **Windows:** PowerShell 5.1+ (built in to Windows 10/11)
 - Internet connection for the first run
 
-No Python installation is needed: the launchers install `uv`, a compatible Python version, and project dependencies automatically.
+The launchers create a versioned project-local `.venv-*` environment and install dependencies with
+standard `pip`; no separate package manager is needed.
 
 ### Windows
 
@@ -164,24 +168,16 @@ and you are ready to use the GUI.
 
 # Software Setup
 
-## Python Setup with UV (Recommended)
-
-The [UV project manager](https://github.com/astral-sh/uv) can be used to handle the Python version and packaging.
-
-```bash
-uv run src/gui.py
-```
-
-TODO: Doesn't currently work on MacOS due to TKinter problems
-
 ## Python Setup with venv
 
-[virtual environment](https://docs.python.org/3/library/venv.html).
+The launchers perform these steps automatically. To run them yourself, use a
+[virtual environment](https://docs.python.org/3/library/venv.html) with Python
+3.10–3.13:
 
 ```bash
 python -m venv venv       # name may change depending on system python
 source venv/bin/activate  # depending on your shell, see venv docs
-python --version          # ensure version is correct (<=3.10)
+python --version          # ensure it is Python 3.10–3.13
 pip install -r requirements.txt
 ```
 
@@ -278,3 +274,120 @@ left_marker_x = 0.0      # x-coordinate for markers on the left side
 x_scale_factor = -1040   # Scaling factor for x-axis movements
 y_scale_factor = -580    # Scaling factor for y-axis movements
 ```
+
+## Camera and device settings
+
+The sidebar separates **Operate**, **Alignment**, **Wafer & tiling**, and
+**Settings**. The workspaces scroll on smaller screens; camera previews fit their
+panel while snapshots and focus measurements retain the original image.
+
+On a fresh launch the camera uses `device = "auto"` and `mode = "auto"`. On Linux,
+Stepper enumerates capture nodes, uses stable `/dev/v4l/by-id` paths where available,
+and reads advertised resolution / format / frame-rate combinations with
+`v4l2-ctl` (optional, provided by `v4l-utils`). It prefers MJPEG at moderate
+resolution, tests multiple decoded frames, and rejects likely solid-green
+corruption. Metadata nodes are excluded; monochrome auxiliary streams require
+explicit selection in Auto device mode. Windows and macOS expose index candidates
+0–7, validated when opened, and use platform capture backends. Existing numeric
+`index` configurations still work.
+
+In **Settings**:
+
+1. Refresh devices and select the intended camera, or enter a device path/index.
+2. Leave capture configuration on **auto**, or read the advertised modes and
+   select one. Manual mode checks the driver's returned resolution, format and
+   frame rate rather than silently claiming the requested settings worked.
+3. **Connect camera** changes the active camera. The status shows its
+   actual mode, errors, and measured capture rate. Reconnection clears stale
+   images and is blocked during exposure or autofocus.
+4. **Save settings** persists selections. Starting from `default.toml` saves to
+   project-local `config.toml`, which the launcher dialog selects next time.
+   A custom configuration is saved back to its selected path. Existing files get
+   timestamped backups; unrelated configuration sections are preserved, although
+   TOML formatting/comments are rewritten. Stage port/enabled changes take effect
+   after saving and restarting. Appearance can be applied immediately.
+
+Capture runs in an isolated process with a watchdog so a blocked driver cannot
+freeze the UI or hang shutdown. A disconnected or stalled feed is cleared;
+reconnect from Settings after fixing the connection. Basler and FLIR retain their
+vendor backends; their SDKs must be installed separately. USB mode negotiation
+and green-frame screening apply to the generic webcam backend. Webcam exposure
+is left under driver control: the red/UV exposure values in microseconds are
+vendor-camera settings, not portable UVC exposure values.
+
+### Green or flickering video
+
+A green preview can indicate a capture-format/decoder problem or an unstable USB
+stream; the image alone cannot identify the cause. Close OBS and other camera
+clients before connecting in Stepper. Try Auto, or an advertised MJPEG mode at
+1280×720 / 30 fps or a lower supported resolution/frame rate. USB speed shown beside
+the device is the negotiated physical link speed, not a software setting. A bad
+cable, insufficient power, a hub, or a hardware/driver fault can still require a
+physical fix. Software cannot guarantee a perfect stream for those conditions.
+Disable green-frame rejection only when the actual specimen fills the view with
+green. Review pixel-based alignment calibration whenever capture resolution changes.
+
+Mode discovery follows the [V4L2 format enumeration API](https://docs.kernel.org/userspace-api/media/v4l/vidioc-enum-fmt.html).
+Requested properties may differ from driver results, as documented by
+[OpenCV's capture property API](https://docs.opencv.org/4.x/d4/d15/group__videoio__flags__base.html).
+
+Run the camera/configuration regression checks with:
+
+```bash
+PYTHONPATH=src .venv-3.12/bin/python -m unittest discover -s tests -v
+```
+
+Use the Python executable from your launcher-created virtual environment if its
+version differs.
+
+### Readable text on Linux
+
+The default dark theme uses a system sans-serif font, larger controls, and padded
+camera dropdowns. **Settings → Appearance** offers Light / Dark and 100%, 125%,
+or 150% text size. Changing appearance does not reconnect devices. Motion uses
+explicit direction buttons with a single distance-per-click field.
+
+Some standalone Python distributions ship Tk without Xft font rendering. On
+those runtimes every requested font can collapse to the same tiny bitmap font;
+changing the application's font size alone cannot fix it. This checkout has a
+project-local Tcl/Tk 9.0.4 build with Xft under `.runtime/tk-9.0.4`. The application
+loads it automatically for a compatible Linux Tcl 9 Python, without modifying
+system Python, desktop settings, or other applications.
+
+To reproduce that optional build on another Linux machine:
+
+```bash
+./tools/build_tk.sh
+```
+
+It requires a C compiler, make, curl, pkg-config, and the X11/Xft/fontconfig
+development libraries. The script downloads checksum-pinned official Tcl/Tk
+sources and keeps all build/install files under `.runtime/` (git-ignored).
+Removing `.runtime/tk-9.0.4` restores the Python runtime's original Tk. Windows,
+macOS, and Python builds using Tcl 8 continue to use their bundled/system Tk.
+
+### Z-axis direction
+
+This setup defaults to `invert-z = true` under `[stage]`. The app reverses Z
+in both absolute and relative movement commands, and reverses Z position
+readback to keep displayed coordinates consistent. X and Y are unchanged.
+Use **Settings → Stage → Reverse Z direction**, then save and restart, to change
+this mapping. Autofocus and other app-driven Z moves use the same mapping.
+This is an application coordinate reversal; it does not change the controller's
+stored direction-polarity or homing settings. Verify direction on the stepper
+computer with a small jog before using saved absolute positions.
+
+If connection fails, **Settings → Camera → Copy camera diagnostics** includes
+the selected device, discovered cameras, and each failed capture attempt. The
+preview clears its connecting state on failure and disables snapshots until
+a live frame is available.
+
+### Fullscreen previews
+
+The app starts with one window. Click either the camera preview or projector
+preview to view it fullscreen in that same window. **Esc** or the **×** button
+returns to the workspace. Camera fullscreen remains live and preserves aspect
+ratio. Projector output uses the same view during an exposure; exiting that
+view stops the exposure and clears the pattern. To use the DLP, put the app on
+the DLP display before opening projector fullscreen. The projector's pattern
+canvas stays 1280×720 regardless of preview size.

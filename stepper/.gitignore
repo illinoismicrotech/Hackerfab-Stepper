@@ -1,3 +1,12 @@
 stepper
 venv
 .venv
+
+# Local runtime, settings, and generated Python bytecode
+.venv-*/
+__pycache__/
+*.py[cod]
+config.toml
+*.toml.*.bak
+
+.runtime/
